@@ -281,5 +281,18 @@ class ELBClient(object):
                     'Id': target.name,
                     'Port': target.port,
                 })
-        self.client.deregister_targets(TargetGroupArn=target_group.arn, Targets=targetConf)
+                # Detach security group if no more ports used on this instance
+                if [target.name for target in currentTargets].count(target.name) == 1:
+                    instance = list(self.ec2client.instances.filter(InstanceIds=[target.name])).pop()
+                    groups = [g for g in instance.security_groups if g.get('GroupName') == target_group.lb_name]
+                    instance.modify_attribute(Groups=groups)
+                self.client.deregister_targets(TargetGroupArn=target_group.arn, Targets=targetConf)
+
+        if not self.listTargets(target_group):
+            # if no more targets remove security_group
+            security_group = [sg for sg in self.ec2client.security_groups.all()
+                              if sg.vpc_id == target_group.vpcId and
+                              sg.group_name == target_group.lb_name
+                              ].pop()
+            security_group.delete()
 
