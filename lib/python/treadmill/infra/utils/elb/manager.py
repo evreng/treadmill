@@ -1,9 +1,6 @@
 from socket import gethostbyname as nslookup
 from treadmill.infra.utils.elb.services import ELBClient
 from time import sleep
-import os
-import re
-from treadmill.dirwatch.linux_dirwatch import LinuxDirWatcher
 
 
 class ELBManager(ELBClient):
@@ -58,5 +55,7 @@ class ELBManager(ELBClient):
     def deregister(self, elb_name):
         tg = self.findTargetGroup(name=elb_name)
         elb = self.findLoadBalancer(name=elb_name)
-        self.client.delete_load_balancer(LoadBalancerArn=elb.arn)
-        self.client.delete_target_group(TargetGroupArn=tg.arn)
+        if elb:
+            self.client.delete_load_balancer(LoadBalancerArn=elb.arn)
+        if tg:
+            self.client.delete_target_group(TargetGroupArn=tg.arn)
