@@ -38,30 +38,36 @@ class EndpointWatcher(ELBManager):
 
     def _on_created(self, path):
         context = self.get_context(path)
-        print("Found new endpoint {}".format(path))
+        print("Found new endpoint {}/{}".format(context.proid_dir, context.fileName))
         targets = [self.getTargetFromFile(path)]
         self.register(context.lb_name, targets)
         print("{} created".format(context.lb_name))
         tg = self.findTargetGroup(name=context.lb_name)
-        self.add_targets(tg, targets)
+        if tg:
+            self.add_targets(tg, targets)
         print("Processed adding of endpoint {}".format(targets))
 
     def _on_deleted(self, path):
         context = self.get_context(path)
-        print("Deleted endpoint {}".format(path))
+        print("Deleted endpoint {}/{}".format(context.proid_dir, context.fileName))
         targets = self.getEndPoints(path)
         tg = self.findTargetGroup(name=context.lb_name)
-        if targets:
+        if tg and targets:
             self.remove_targets(tg, targets)
             print("Processed removing of endpoint {}".format(path))
         else:
             self.deregister(context.lb_name)
             print("Load balancer {} has been removed (no targets)".format(context.lb_name))
 
+    def _on_modified(self, path):
+        self._on_created(path)
+        self._on_deleted(path)
+
     def run(self):
         watch = DirWatcher()
         watch.on_created = self._on_created
         watch.on_deleted = self._on_deleted
+        watch.on_modified = self._on_modified
         while True:
             apps = list(set([d.split('.')[0] for d in os.listdir(self.endpoint_dir)]))
             for app in apps:
@@ -77,5 +83,4 @@ apw = EndpointWatcher(ZKFS_DIR)
 t = Thread(target=apw.run)
 t.daemon = True
 t.start()
-
 

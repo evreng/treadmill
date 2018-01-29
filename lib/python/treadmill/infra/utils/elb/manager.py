@@ -12,8 +12,8 @@ class ELBManager(ELBClient):
     def register(self, elb_name, endpoints):
         instances = list(self.ec2client.instances.filter(InstanceIds=[i for i, p in endpoints]))
         vpcId = set([instance.vpc_id for instance in instances]).pop()
-        elb = self.get_or_create_load_balancer(elb_name, vpcId)
         tg = self.get_or_create_target_group(elb_name, vpcId, endpoints, 'TCP', 8000)
+        elb = self.get_or_create_load_balancer(elb_name, vpcId)
         listener = self.get_or_create_elb_listener(elb, 8000, [tg])
 
         try:

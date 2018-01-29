@@ -198,7 +198,7 @@ class ELBClient(object):
         listeners = self.listELBListeners(elb)
         if port:
             listeners = list(filter(lambda lstn: lstn.port == port, listeners))
-        return listeners.pop() if listeners else None
+        return listeners.pop() if listeners else []
 
     def get_or_create_target_group(self, tg_name, vpc, targets, protocol, port):
         '''
