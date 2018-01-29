@@ -1,8 +1,10 @@
 from treadmill.infra.utils.elb.manager import ELBManager
 from treadmill.dirwatch import DirWatcher
+from types import SimpleNamespace
 import os
 import re
 import logging
+from threading import Thread
 
 ZKFS_DIR = '/tmp/zkfs-test'
 _LOGGER = logging.getLogger(__name__)
@@ -14,44 +16,47 @@ class EndpointWatcher(ELBManager):
         self.on_created = self._on_created
         self.on_deleted = self._on_deleted
 
-    def set_context(self, path):
-        self.proid, self.fileName = path.split('/')[-2:]
-        self.app, self.cell, self.protocol = re.search('([a-z0-9-]+)\.([a-z0-9-]+)#\d*:\w+:(\w+)', self.fileName).groups()
-        self.lb_name = "{}-{}-{}-{}".format(self.proid, self.app, self.cell, self.protocol)
-        self.fileRegex = '{}.{}#\d+:.*:{}'.format(self.app, self.cell, self.protocol)
-        self.proid_dir = '{}/{}'.format(self.endpoint_dir, self.proid)
+    def get_context(self, path):
+        c = SimpleNamespace()
+        c.proid, c.fileName = path.split('/')[-2:]
+        c.app, c.cell, c.protocol = re.search('([a-z0-9-]+)\.([a-z0-9-]+)#\d*:\w+:(\w+)', c.fileName).groups()
+        c.lb_name = "{}-{}-{}-{}".format(c.proid, c.app, c.cell, c.protocol)
+        c.fileRegex = '{}.{}#\d+:.*:{}'.format(c.app, c.cell, c.protocol)
+        c.proid_dir = '{}/{}'.format(self.endpoint_dir, c.proid)
+        return c
 
     def getTargetFromFile(self, path):
         instanceId, port = open(path).read().split(':')
         return instanceId, int(port)
 
     def getEndPoints(self, path):
-        files = ["{}/{}".format(dir, fileName) for fileName in os.listdir(self.proid_dir)
-                 if re.match(self.fileRegex, fileName)
+        context = self.get_context(path)
+        files = ["{}/{}".format(context.proid_dir, fileName) for fileName in os.listdir(context.proid_dir)
+                 if re.match(context.fileRegex, fileName)
                  ]
-        return [self.getTargetFromFile(file) for file in files]
+        return [self.getTargetFromFile(file) for file in files if os.path.exists(file)]
 
     def _on_created(self, path):
-        self.set_context(path)
+        context = self.get_context(path)
         print("Found new endpoint {}".format(path))
         targets = [self.getTargetFromFile(path)]
-        self.register(self.lb_name, targets)
-        print("{} created".format(self.lb_name))
-        tg = self.findTargetGroup(name=self.lb_name)
+        self.register(context.lb_name, targets)
+        print("{} created".format(context.lb_name))
+        tg = self.findTargetGroup(name=context.lb_name)
         self.add_targets(tg, targets)
         print("Processed adding of endpoint {}".format(targets))
 
     def _on_deleted(self, path):
-        self.set_context(path)
+        context = self.get_context(path)
         print("Deleted endpoint {}".format(path))
         targets = self.getEndPoints(path)
-        tg = self.findTargetGroup(name=self.lb_name)
+        tg = self.findTargetGroup(name=context.lb_name)
         if targets:
             self.remove_targets(tg, targets)
             print("Processed removing of endpoint {}".format(path))
         else:
-            self.deregister(self.lb_name)
-            print("Load balancer {} has been removed (no targets)".format(self.lb_name))
+            self.deregister(context.lb_name)
+            print("Load balancer {} has been removed (no targets)".format(context.lb_name))
 
     def run(self):
         watch = DirWatcher()
@@ -69,7 +74,8 @@ class EndpointWatcher(ELBManager):
 
 
 apw = EndpointWatcher(ZKFS_DIR)
-apw.run()
-
+t = Thread(target=apw.run)
+t.daemon = True
+t.start()
 
 
