@@ -1,7 +1,9 @@
 from treadmill.infra import constants
 from treadmill.infra.connection import Connection
 import re
+import logging
 
+_LOGGER = logging.getLogger(__name__)
 
 class Listener(object):
     def __init__(self, data={}):
@@ -175,6 +177,8 @@ class ELBClient(object):
         return listeners
 
     def listTargets(self, tg):
+        if not tg:
+            return []
         targets = self.client.describe_target_health(TargetGroupArn=tg.arn)
         return [Target(t) for t in targets.get('TargetHealthDescriptions')]
 
@@ -200,6 +204,20 @@ class ELBClient(object):
             listeners = list(filter(lambda lstn: lstn.port == port, listeners))
         return listeners.pop() if listeners else []
 
+
+    def get_or_create_security_group(self, target_group):
+        elb_name = target_group.name.split('-')[0]
+        try:
+            sg = [sg for sg in list(self.ec2client.security_groups.all())
+                  if sg.vpc_id == target_group.vpcId
+                  and sg.group_name == elb_name].pop()
+        except:
+            sg = self.ec2client.create_security_group(
+                Description="treadmill loadbalancer healthCheck",
+                GroupName=elb_name,
+                VpcId=target_group.vpcId)
+        return sg
+
     def get_or_create_target_group(self, tg_name, vpc, targets, protocol, port):
         '''
         :param tg_name: target group name
@@ -219,6 +237,7 @@ class ELBClient(object):
             self.client.create_target_group(**tg.getConfiguration())
             tg = self.findTargetGroup(tg.name)
             tg.subnets = [instance.subnet_id for instance in instances]
+            _LOGGER.info("Added new target Group: {}".format(tg.name))
         return tg
 
     def get_or_create_load_balancer(self, elb_name, vpcId, security_groups=[]):
@@ -234,65 +253,21 @@ class ELBClient(object):
             elb.securityGroups = security_groups
             self.client.create_load_balancer(**elb.getConfiguration())
             elb = self.findLoadBalancer(name=elb.name)
+            _LOGGER.info("Added new ELB: {}".format(elb_name))
         return elb
 
-    def get_or_create_elb_listener(self, elb, port, target_groups=[]):
-        listener = self.findListener(elb, port)
+    def get_or_create_elb_listener(self, elb, target_group):
+        listener = self.findListener(elb, target_group.port)
         if not listener:
             listener = Listener()
             listener.loadBalancerArn = elb.arn
-            listener.port = port
-            listener.defaultActions = [{
-                'Type': 'forward',
-                'TargetGroupArn': tg.arn
-            }
-                for tg in target_groups
+            listener.port = target_group.port
+            listener.defaultActions = [
+                {'Type': 'forward',
+                'TargetGroupArn': target_group.arn}
             ]
-            conf = listener.getConfiguration()
             self.client.create_listener(**listener.getConfiguration())
-            listener = self.findListener(elb, port)
+            listener = self.findListener(elb, target_group.port)
+            _LOGGER.info("Added new listener: {} for target group {}".format(listener.name, target_group.name))
         return listener
-
-    def add_targets(self, target_group, targets):
-        '''
-        :param target_group: TargetGroup object
-        :param targets: ((:type str instance-id, :type int port), )
-        :return: None
-        '''
-        targetConf = []
-        for instanceId, port in targets:
-            targetConf.append({
-                'Id': instanceId,
-                'Port': port,
-            })
-        self.client.register_targets(TargetGroupArn=target_group.arn, Targets=targetConf)
-
-    def remove_targets(self, target_group, targets):
-        '''
-        :param target_group: TargetGroup object
-        :param targets: ((:type str instance-id, :type int port), )
-        :return: None
-        '''
-        targetConf = []
-        currentTargets = self.listTargets(target_group)
-        for target in currentTargets:
-            if (target.name, target.port) not in targets:
-                targetConf.append({
-                    'Id': target.name,
-                    'Port': target.port,
-                })
-                # Detach security group if no more ports used on this instance
-                if [target.name for target in currentTargets].count(target.name) == 1:
-                    instance = list(self.ec2client.instances.filter(InstanceIds=[target.name])).pop()
-                    groups = [g for g in instance.security_groups if g.get('GroupName') == target_group.lb_name]
-                    instance.modify_attribute(Groups=groups)
-                self.client.deregister_targets(TargetGroupArn=target_group.arn, Targets=targetConf)
-
-        if not self.listTargets(target_group):
-            # if no more targets remove security_group
-            security_group = [sg for sg in self.ec2client.security_groups.all()
-                              if sg.vpc_id == target_group.vpcId and
-                              sg.group_name == target_group.lb_name
-                              ].pop()
-            security_group.delete()
 
