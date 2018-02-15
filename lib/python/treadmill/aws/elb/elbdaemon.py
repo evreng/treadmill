@@ -25,10 +25,10 @@ class EndpointWatcherThread(Thread):
     def stop(self):
         self._stop_event.set()
         Thread.join(self, timeout=0)
-        _LOGGER.info("{} has stopped".format(self.name))
+        print("{} has stopped".format(self.name))
 
     def start(self):
-        _LOGGER.info("{} has started".format(self.name))
+        print("{} has started".format(self.name))
         Thread.start(self)
 
 
@@ -64,26 +64,26 @@ class EndpointWatcher(ELBManager):
 
     def _on_created(self, path):
         context = self.get_context(path)
-        _LOGGER.info("Found new endpoint {}/{}".format(context.proid_dir, context.fileName))
+        print("Found new endpoint {}/{}".format(context.proid_dir, context.fileName))
         targets = [self.getTargetFromFile(path)]
         self.register(context.proid, context.tg_name, targets)
         tg = self.findTargetGroup(name=context.tg_name)
         if tg:
             self.add_targets(tg, targets)
             self.update_app_groups(path, tg)
-        _LOGGER.info("Processed adding of endpoint {}".format(targets))
+        print("Processed adding of endpoint {}".format(targets))
 
     def _on_deleted(self, path):
         context = self.get_context(path)
         if not context:
             return
-        _LOGGER.info("Deleted endpoint {}/{}".format(context.proid_dir, context.fileName))
+        print("Deleted endpoint {}/{}".format(context.proid_dir, context.fileName))
         leftTargets = self.getEndPoints(path)
         tg = self.findTargetGroup(name=context.tg_name)
         if not tg:
             return
         targets = self.remove_targets(tg, leftTargets)
-        _LOGGER.info("Processed removing of endpoint {}".format(targets))
+        print("Processed removing of endpoint {}".format(targets))
         if not leftTargets:
             self.deregister(context.tg_name)
         self.update_app_groups(path, tg)
