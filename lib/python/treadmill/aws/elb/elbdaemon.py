@@ -5,7 +5,7 @@
 or in the foreground:
     elbManagerDaemon.run()
 '''
-from treadmill.infra.utils.elb.manager import ELBManager
+from treadmill.infra.utils.aws.elb.manager import ELBManager
 from treadmill.dirwatch import DirWatcher
 from types import SimpleNamespace
 import os
@@ -125,3 +125,5 @@ class EndpointWatcher(ELBManager):
             self.thread.stop()
         self.thread = None
 
+
+    
