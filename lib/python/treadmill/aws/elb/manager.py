@@ -1,5 +1,5 @@
 from socket import gethostbyname as nslookup
-from treadmill.infra.utils.aws.elb.services import ELBClient
+from treadmill.aws.elb.services import ELBClient
 from time import sleep
 from random import randrange
 import os
