@@ -5,7 +5,7 @@
 or in the foreground:
     elbManagerDaemon.run()
 '''
-from treadmill.infra.utils.aws.elb.manager import ELBManager
+from treadmill.aws.elb.manager import ELBManager
 from treadmill.dirwatch import DirWatcher
 from types import SimpleNamespace
 import os
@@ -13,7 +13,7 @@ import re
 import logging
 from threading import Event, Thread
 
-ZKFS_DIR = '/tmp/zkfs-test'
+ZKFS_DIR = '/tmp/zkfs'
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -25,10 +25,10 @@ class EndpointWatcherThread(Thread):
     def stop(self):
         self._stop_event.set()
         Thread.join(self, timeout=0)
-        print("{} has stopped".format(self.name))
+        _LOGGER.info("{} has stopped".format(self.name))
 
     def start(self):
-        print("{} has started".format(self.name))
+        _LOGGER.info("{} has started".format(self.name))
         Thread.start(self)
 
 
@@ -43,17 +43,18 @@ class EndpointWatcher(ELBManager):
         c = SimpleNamespace()
         c.proid, c.fileName = path.split('/')[-2:]
         try:
-            c.app, c.cell, c.protocol = re.search('([a-z0-9-]+)\.([a-z0-9-]+)#\d*:\w+:(\w+)', c.fileName).groups()
+            c.app, c.protocol = re.search('([a-z0-9-]+)#\d*:\w+:(\w+)', c.fileName).groups()
+            c.cell = os.environ.get('TREADMILL_CELL')
         except:
             return None
-        c.tg_name = "{}-{}-{}-{}".format(c.proid, c.app, c.cell, c.protocol)
-        c.fileRegex = '{}.{}#\d+:.*:{}'.format(c.app, c.cell, c.protocol)
+        c.tg_name = "{}-{}-{}".format(c.proid, c.app, c.protocol)
+        c.fileRegex = '{}#\d+:.*:{}'.format(c.app, c.protocol)
         c.proid_dir = '{}/{}'.format(self.endpoint_dir, c.proid)
         return c
 
     def getTargetFromFile(self, path):
-        instanceId, port = open(path).read().split(':')
-        return instanceId, int(port)
+        hostname, port = open(path).read().split(':')
+        return hostname, int(port)
 
     def getEndPoints(self, path):
         context = self.get_context(path)
@@ -64,26 +65,26 @@ class EndpointWatcher(ELBManager):
 
     def _on_created(self, path):
         context = self.get_context(path)
-        print("Found new endpoint {}/{}".format(context.proid_dir, context.fileName))
+        _LOGGER.info("Found new endpoint {}/{}".format(context.proid_dir, context.fileName))
         targets = [self.getTargetFromFile(path)]
         self.register(context.proid, context.tg_name, targets)
         tg = self.findTargetGroup(name=context.tg_name)
         if tg:
             self.add_targets(tg, targets)
             self.update_app_groups(path, tg)
-        print("Processed adding of endpoint {}".format(targets))
+        _LOGGER.info("Processed adding of endpoint {}".format(targets))
 
     def _on_deleted(self, path):
         context = self.get_context(path)
         if not context:
             return
-        print("Deleted endpoint {}/{}".format(context.proid_dir, context.fileName))
+        _LOGGER.info("Deleted endpoint {}/{}".format(context.proid_dir, context.fileName))
         leftTargets = self.getEndPoints(path)
         tg = self.findTargetGroup(name=context.tg_name)
         if not tg:
             return
         targets = self.remove_targets(tg, leftTargets)
-        print("Processed removing of endpoint {}".format(targets))
+        _LOGGER.info("Processed removing of endpoint {}".format(targets))
         if not leftTargets:
             self.deregister(context.tg_name)
         self.update_app_groups(path, tg)
@@ -125,5 +126,4 @@ class EndpointWatcher(ELBManager):
             self.thread.stop()
         self.thread = None
 
-
-    
+EndpointWatcher(ZKFS_DIR).run()

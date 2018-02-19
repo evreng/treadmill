@@ -1,5 +1,5 @@
 from socket import gethostbyname as nslookup
-from treadmill.infra.utils.aws.elb.services import ELBClient
+from treadmill.aws.elb.services import ELBClient
 from time import sleep
 from random import randrange
 import os
@@ -17,7 +17,9 @@ class ELBManager(ELBClient):
         self.app_groups_dir = '{}/app-groups'.format(self.root_dir)
 
     def register(self, elb_name, tg_name, endpoints):
-        instances = list(self.ec2client.instances.filter(InstanceIds=[i for i, p in endpoints]))
+        instances = list(self.ec2client.instances.filter(
+                        Filters=[{"Name": "Name", "Value": [h for h, i in endpoints]}])
+        )
         vpcId = set([instance.vpc_id for instance in instances]).pop()
         usedPorts = [tg.port for tg in self.listTargetGroups()]
         trafficPort = getRandomPort(8000, 8999)
