@@ -18,7 +18,7 @@ class ELBManager(ELBClient):
 
     def register(self, elb_name, tg_name, endpoints):
         instances = list(self.ec2client.instances.filter(
-                        Filters=[{"Name": "Name", "Value": [h for h, i in endpoints]}])
+                        Filters=[{"Name": "tag:Name", "Values": [h for h, i in endpoints]}])
         )
         vpcId = set([instance.vpc_id for instance in instances]).pop()
         usedPorts = [tg.port for tg in self.listTargetGroups()]
