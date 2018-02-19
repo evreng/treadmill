@@ -126,4 +126,3 @@ class EndpointWatcher(ELBManager):
             self.thread.stop()
         self.thread = None
 
-EndpointWatcher(ZKFS_DIR).run()
