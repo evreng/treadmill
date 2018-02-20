@@ -227,7 +227,9 @@ class ELBClient(object):
         :return:
         '''
         tg = self.findTargetGroup(name=tg_name)
-        instances = list(self.ec2client.instances.filter(InstanceIds=[instance_id for instance_id, port in targets]))
+        instances = list(self.ec2client.instances.filter(
+            Filters=[{"Name": "tag:Name", "Value": [h for h, i in targets]}])
+        )
         if not tg:
             tg = TargetGroup()
             tg.name = tg_name
