@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 
 import logging
 import os
+import signal
 
 import click
 
@@ -15,6 +16,10 @@ from treadmill import appenv
 from treadmill import diskbenchmark
 from treadmill import localdiskutils
 from treadmill.fs import linux as fs_linux
+from treadmill import fs
+from treadmill import zkutils
+from treadmill import context
+from treadmill import utils
 
 from .. import services
 
@@ -40,31 +45,44 @@ def init():
 
     @service.command()
     @click.option('--img-location',
-                  help='Location of loopback image to back LVM group.')
+                  help='Location of loopback image to back LVM group.',
+                  envvar='TREADMILL_LOCALDISK_IMG_LOCATION')
     @click.option('--img-size', default='-2G',
-                  help='Amount of local disk space to use for the image.')
+                  help='Amount of local disk space to use for the image.',
+                  envvar='TREADMILL_LOCALDISK_IMG_SIZE')
     @click.option('--block-dev',
-                  help='Use a block device to back LVM group.')
+                  help='Use a block device to back LVM group.',
+                  envvar='TREADMILL_LOCALDISK_BLOCK_DEV')
     @click.option('--vg-name',
-                  help='Name of LVM volume group to use.')
+                  help='Name of LVM volume group to use.',
+                  envvar='TREADMILL_LOCALDISK_VG_NAME')
     @click.option('--block-dev-configuration',
-                  help='Block device io throughput configuration.')
+                  help='Block device io throughput configuration.',
+                  envvar='TREADMILL_BLOCK_DEV_CONFIGURATION')
     @click.option('--block-dev-read-bps',
-                  help='Block device read byte per second value.')
+                  help='Block device read byte per second value.',
+                  envvar='TREADMILL_BLOCK_DEV_READ_BPS')
     @click.option('--block-dev-write-bps',
-                  help='Block device write byte per second value.')
+                  help='Block device write byte per second value.',
+                  envvar='TREADMILL_BLOCK_DEV_WRITE_BPS')
     @click.option('--block-dev-read-iops', type=int,
-                  help='Block device read IO per second value.')
+                  help='Block device read IO per second value.',
+                  envvar='TREADMILL_BLOCK_DEV_READ_IOPS')
     @click.option('--block-dev-write-iops', type=int,
-                  help='Block device write IO per second value.')
+                  help='Block device write IO per second value.',
+                  envvar='TREADMILL_BLOCK_DEV_WRITE_IOPS')
     @click.option('--default-read-bps', required=True,
-                  help='Default read byte per second value.')
+                  help='Default read byte per second value.',
+                  envvar='TREADMILL_LOCALDISK_DEFAULT_READ_BPS')
     @click.option('--default-write-bps', required=True,
-                  help='Default write byte per second value.')
+                  help='Default write byte per second value.',
+                  envvar='TREADMILL_LOCALDISK_DEFAULT_WRITE_BPS')
     @click.option('--default-read-iops', required=True, type=int,
-                  help='Default read IO per second value.')
+                  help='Default read IO per second value.',
+                  envvar='TREADMILL_LOCALDISK_DEFAULT_READ_IOPS')
     @click.option('--default-write-iops', required=True, type=int,
-                  help='Default write IO per second value.')
+                  help='Default write IO per second value.',
+                  envvar='TREADMILL_LOCALDISK_DEFAULT_WRITE_IOPS')
     def localdisk(img_location, img_size, block_dev, vg_name,
                   block_dev_configuration,
                   block_dev_read_bps, block_dev_write_bps,
@@ -73,13 +91,12 @@ def init():
                   default_read_iops, default_write_iops):
         """Runs localdisk service."""
 
-        impl = 'treadmill.services.localdisk_service.LocalDiskResourceService'
         root_dir = local_ctx['root-dir']
         watchdogs_dir = local_ctx['watchdogs-dir']
 
         svc = services.ResourceService(
             service_dir=os.path.join(root_dir, 'localdisk_svc'),
-            impl=impl
+            impl='localdisk'
         )
 
         block_dev_params = [block_dev_read_bps, block_dev_write_bps,
@@ -89,7 +106,7 @@ def init():
 
         # prepare block device
         if block_dev is not None:
-            underlying_device_uuid = fs_linux.device_uuid(
+            underlying_device_uuid = fs_linux.blk_uuid(
                 block_dev
             )
         else:
@@ -175,7 +192,7 @@ def init():
 
         svc = services.ResourceService(
             service_dir=os.path.join(root_dir, 'cgroup_svc'),
-            impl='treadmill.services.cgroup_service.CgroupResourceService',
+            impl='cgroup',
         )
 
         svc.run(
@@ -200,7 +217,7 @@ def init():
 
         svc = services.ResourceService(
             service_dir=os.path.join(root_dir, 'network_svc'),
-            impl='treadmill.services.network_service.NetworkResourceService',
+            impl='network',
         )
 
         svc.run(
@@ -212,6 +229,43 @@ def init():
             ext_speed=ext_speed
         )
 
+    @service.command()
+    @click.option('--zkid', help='Zookeeper session ID file.')
+    def presence(zkid):
+        """Runs the presence service.
+        """
+        root_dir = local_ctx['root-dir']
+        watchdogs_dir = local_ctx['watchdogs-dir']
+
+        # Explicitely create global zk connection, so that zk session id is
+        # preserved.
+        context.GLOBAL.zk.conn = zkutils.connect(
+            context.GLOBAL.zk.url,
+            idpath=zkid
+        )
+
+        def sigterm_handler(_signo, _stack_frame):
+            """Handle sigterm.
+
+            On sigterm, stop Zookeeper session and delete Zookeeper session
+            id file.
+            """
+            _LOGGER.info('Got SIGTERM, closing zk session and rm: %s', zkid)
+            fs.rm_safe(zkid)
+            context.GLOBAL.zk.conn.stop()
+
+        signal.signal(utils.term_signal(), sigterm_handler)
+
+        svc = services.ResourceService(
+            service_dir=os.path.join(root_dir, 'presence_svc'),
+            impl='presence',
+        )
+
+        svc.run(
+            watchdogs_dir=os.path.join(root_dir, watchdogs_dir)
+        )
+
+    del presence
     del localdisk
     del cgroup
     del network

@@ -30,12 +30,13 @@ _INVALID_IDENTITY = sys.maxsize
 # Time to wait when registering endpoints in case previous ephemeral
 # endpoint is still present.
 _EPHEMERAL_RETRY_INTERVAL = 5
+_EPHEMERAL_RETRY_COUNT = 13
 
 
 def _create_ephemeral_with_retry(zkclient, path, data):
     """Create ephemeral node with retry."""
     prev_data = None
-    for _ in range(0, 5):
+    for _ in range(0, _EPHEMERAL_RETRY_COUNT):
         try:
             return zkutils.create(zkclient, path, data, acl=[_SERVERS_ACL],
                                   ephemeral=True)
@@ -146,6 +147,25 @@ class EndpointPresence(object):
             z.path.identity_group(identity_group, str(identity)),
             {'host': self.hostname, 'app': self.appname},
         )
+
+    def unregister_identity(self):
+        """Register app identity."""
+        identity_group = self.manifest.get('identity_group')
+
+        # If identity_group is not set or set to None, nothing to register.
+        if not identity_group:
+            return
+
+        identity = self.manifest.get('identity', _INVALID_IDENTITY)
+
+        _LOGGER.info('Unregister identity: %s, %s', identity_group, identity)
+        path = z.path.identity_group(identity_group, str(identity))
+        try:
+            data = zkutils.get(self.zkclient, path)
+            if data['host'] == self.hostname:
+                zkutils.ensure_deleted(self.zkclient, path)
+        except kazoo.client.NoNodeError:
+            _LOGGER.info('identity node %s does not exist.', path)
 
 
 def server_node(hostname, presence_id):
